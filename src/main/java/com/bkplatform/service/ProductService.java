@@ -37,26 +37,24 @@ public class ProductService {
      * Search products with filters, sorting, and pagination
      */
     public Page<Product> search(String search, Long categoryId, String sortBy, int page, int size) {
-        // ✅ FIX: Implement sort parameter
         Sort sort = buildSort(sortBy);
         Pageable pageable = PageRequest.of(page, size, sort);
 
         Specification<Product> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
-            // Search by name
+            // Search by name or description
             if (search != null && !search.trim().isEmpty()) {
                 String searchPattern = "%" + search.toLowerCase().trim() + "%";
-                predicates.add(cb.like(cb.lower(root.get("name")), searchPattern));
+                Predicate namePredicate = cb.like(cb.lower(root.get("name")), searchPattern);
+                Predicate descPredicate = cb.like(cb.lower(root.get("description")), searchPattern);
+                predicates.add(cb.or(namePredicate, descPredicate));
             }
 
             // Filter by category
             if (categoryId != null) {
                 predicates.add(cb.equal(root.get("category").get("categoryId"), categoryId));
             }
-
-            // ✅ Only show products with stock > 0 (optional)
-            // predicates.add(cb.gt(root.get("stockQuantity"), 0));
 
             return cb.and(predicates.toArray(new Predicate[0]));
         };
@@ -106,8 +104,13 @@ public class ProductService {
         log.info("Creating product for user: {}", owner.getUsername());
 
         // ✅ Validate price
-        if (req.getPrice().compareTo(BigDecimal.ZERO) <= 0) {
+        if (req.getPrice() == null || req.getPrice().compareTo(BigDecimal.ZERO) <= 0) {
             throw new IllegalArgumentException("Price must be greater than 0");
+        }
+
+        // ✅ Validate name
+        if (req.getName() == null || req.getName().trim().isEmpty()) {
+            throw new IllegalArgumentException("Product name is required");
         }
 
         // ✅ Validate stock quantity
@@ -128,13 +131,13 @@ public class ProductService {
         // Build product
         Product product = Product.builder()
                 .shop(shop)
-                .name(req.getName())
+                .name(req.getName().trim())
                 .price(req.getPrice())
-                .description(req.getDescription())
+                .description(req.getDescription() != null ? req.getDescription().trim() : null)
                 .stockQuantity(req.getStockQuantity() != null ? req.getStockQuantity() : 0)
                 .build();
 
-        // ✅ FIX: Validate category exists before setting
+        // ✅ Validate and set category
         if (req.getCategoryId() != null) {
             Category category = categoryRepository.findById(req.getCategoryId())
                     .orElseThrow(() -> new ResourceNotFoundException(
@@ -151,13 +154,19 @@ public class ProductService {
 
     /**
      * Update product (only by owner)
+     * ✅ FIX: Return Optional<Product> to match controller expectation
      */
     @Transactional
-    public Product update(Long id, UpdateProductRequest req, User owner) {
+    public Optional<Product> update(Long id, UpdateProductRequest req, User owner) {
         log.info("Updating product {} by user: {}", id, owner.getUsername());
 
-        Product product = productRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + id));
+        Optional<Product> productOpt = productRepository.findById(id);
+
+        if (productOpt.isEmpty()) {
+            return Optional.empty();
+        }
+
+        Product product = productOpt.get();
 
         // ✅ Check ownership
         if (!product.getShop().getOwner().getUserId().equals(owner.getUserId())) {
@@ -166,7 +175,7 @@ public class ProductService {
 
         // ✅ Update fields with validation
         if (req.getName() != null && !req.getName().trim().isEmpty()) {
-            product.setName(req.getName());
+            product.setName(req.getName().trim());
         }
 
         if (req.getPrice() != null) {
@@ -177,7 +186,7 @@ public class ProductService {
         }
 
         if (req.getDescription() != null) {
-            product.setDescription(req.getDescription());
+            product.setDescription(req.getDescription().trim());
         }
 
         if (req.getStockQuantity() != null) {
@@ -187,7 +196,7 @@ public class ProductService {
             product.setStockQuantity(req.getStockQuantity());
         }
 
-        // ✅ FIX: Validate category exists
+        // ✅ Validate and update category
         if (req.getCategoryId() != null) {
             Category category = categoryRepository.findById(req.getCategoryId())
                     .orElseThrow(() -> new ResourceNotFoundException(
@@ -199,18 +208,24 @@ public class ProductService {
         Product updated = productRepository.save(product);
         log.info("Updated product {}", id);
 
-        return updated;
+        return Optional.of(updated);
     }
 
     /**
      * Delete product (only by owner)
+     * ✅ FIX: Return boolean to match controller expectation
      */
     @Transactional
-    public void delete(Long id, User owner) {
+    public boolean delete(Long id, User owner) {
         log.info("Deleting product {} by user: {}", id, owner.getUsername());
 
-        Product product = productRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + id));
+        Optional<Product> productOpt = productRepository.findById(id);
+
+        if (productOpt.isEmpty()) {
+            return false;
+        }
+
+        Product product = productOpt.get();
 
         // ✅ Check ownership
         if (!product.getShop().getOwner().getUserId().equals(owner.getUserId())) {
@@ -219,6 +234,8 @@ public class ProductService {
 
         productRepository.delete(product);
         log.info("Deleted product {}", id);
+
+        return true;
     }
 
     /**

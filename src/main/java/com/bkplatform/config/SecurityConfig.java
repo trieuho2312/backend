@@ -84,7 +84,13 @@ public class SecurityConfig {
                         // ✅ User profile operations - require authentication
                         .requestMatchers("/api/users/**").authenticated()
 
-                        // ✅ Admin endpoints - require ADMIN role (using method security)
+                        // ✅ Conversation operations - require authentication
+                        .requestMatchers("/api/conversations/**").authenticated()
+
+                        // ✅ Test endpoints - ADMIN only (hoặc comment out trong production)
+                        .requestMatchers("/api/test/**").hasRole("ADMIN")
+
+                        // ✅ Admin endpoints - require ADMIN role
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
                         // ✅ All other requests require authentication
@@ -102,16 +108,14 @@ public class SecurityConfig {
 
     /**
      * CORS configuration
+     * ✅ FIX: Dùng setAllowedOriginPatterns thay vì setAllowedOrigins
      */
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
-        // ✅ FIX: Use specific origins from properties instead of wildcards
-        config.setAllowedOrigins(List.of(allowedOrigins));
-
-        // ✅ Alternative: Use patterns for development (not recommended for production)
-        // config.setAllowedOriginPatterns(List.of("http://localhost:*", "http://127.0.0.1:*"));
+        // ✅ FIX: Phải dùng setAllowedOriginPatterns khi allowCredentials = true
+        config.setAllowedOriginPatterns(List.of(allowedOrigins));
 
         // ✅ Allow credentials (required for cookies/auth headers)
         config.setAllowCredentials(true);
@@ -167,7 +171,6 @@ public class SecurityConfig {
      */
     @Bean
     public PasswordEncoder passwordEncoder() {
-        // ✅ BCrypt with strength 12 (default is 10)
         return new BCryptPasswordEncoder(12);
     }
 

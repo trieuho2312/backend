@@ -8,14 +8,18 @@ import com.bkplatform.repository.UserRepository;
 import com.bkplatform.service.ProductService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
+@Slf4j
 @RestController
 @RequestMapping("/api/products")
 @RequiredArgsConstructor
@@ -24,7 +28,9 @@ public class ProductController {
     private final ProductService productService;
     private final UserRepository userRepository;
 
-    // ✅ PUBLIC - Tìm kiếm sản phẩm (KHÔNG CẦN TOKEN)
+    /**
+     * ✅ PUBLIC - Search products (NO TOKEN REQUIRED)
+     */
     @GetMapping
     public ResponseEntity<Page<Product>> search(
             @RequestParam(required = false) String search,
@@ -37,7 +43,9 @@ public class ProductController {
         return ResponseEntity.ok(products);
     }
 
-    // ✅ PUBLIC - Xem chi tiết sản phẩm (KHÔNG CẦN TOKEN)
+    /**
+     * ✅ PUBLIC - Get product by ID (NO TOKEN REQUIRED)
+     */
     @GetMapping("/{id}")
     public ResponseEntity<Product> getById(@PathVariable Long id) {
         return productService.findById(id)
@@ -45,7 +53,10 @@ public class ProductController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    // ✅ PROTECTED - Tạo sản phẩm mới (CẦN TOKEN)
+    /**
+     * ✅ PROTECTED - Create product (TOKEN REQUIRED)
+     * FIX: Better error handling và logging
+     */
     @PostMapping
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<?> create(
@@ -54,16 +65,33 @@ public class ProductController {
 
         try {
             User owner = userRepository.findByUsername(principal.getUsername())
-                    .orElseThrow(() -> new UsernameNotFoundException("User not found: " + principal.getUsername()));
+                    .orElseThrow(() -> new RuntimeException("User not found"));
 
             Product product = productService.create(req, owner);
-            return ResponseEntity.ok(product);
+
+            log.info("Product created: {} by user: {}", product.getProductId(), owner.getUsername());
+
+            return ResponseEntity.status(HttpStatus.CREATED).body(product);
+
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid product data: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", "error",
+                    "message", e.getMessage()
+            ));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Error: " + e.getMessage());
+            log.error("Error creating product", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "status", "error",
+                    "message", "Failed to create product"
+            ));
         }
     }
 
-    // ✅ PROTECTED - Cập nhật sản phẩm (CẦN TOKEN)
+    /**
+     * ✅ PROTECTED - Update product (TOKEN REQUIRED)
+     * FIX: Better error handling
+     */
     @PutMapping("/{id}")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<?> update(
@@ -73,17 +101,39 @@ public class ProductController {
 
         try {
             User owner = userRepository.findByUsername(principal.getUsername())
-                    .orElseThrow(() -> new UsernameNotFoundException("User not found: " + principal.getUsername()));
+                    .orElseThrow(() -> new RuntimeException("User not found"));
 
             return productService.update(id, req, owner)
-                    .map(ResponseEntity::ok)
+                    .map(product -> {
+                        log.info("Product updated: {} by user: {}", id, owner.getUsername());
+                        return ResponseEntity.ok(product);
+                    })
                     .orElse(ResponseEntity.notFound().build());
+
+        } catch (SecurityException e) {
+            log.warn("Unauthorized product update attempt: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                    "status", "error",
+                    "message", "You don't have permission to update this product"
+            ));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", "error",
+                    "message", e.getMessage()
+            ));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Error: " + e.getMessage());
+            log.error("Error updating product", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "status", "error",
+                    "message", "Failed to update product"
+            ));
         }
     }
 
-    // ✅ PROTECTED - Xóa sản phẩm (CẦN TOKEN)
+    /**
+     * ✅ PROTECTED - Delete product (TOKEN REQUIRED)
+     * FIX: Better error handling
+     */
     @DeleteMapping("/{id}")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<?> delete(
@@ -92,15 +142,32 @@ public class ProductController {
 
         try {
             User owner = userRepository.findByUsername(principal.getUsername())
-                    .orElseThrow(() -> new UsernameNotFoundException("User not found: " + principal.getUsername()));
+                    .orElseThrow(() -> new RuntimeException("User not found"));
 
             boolean deleted = productService.delete(id, owner);
+
             if (deleted) {
-                return ResponseEntity.ok("Product deleted successfully");
+                log.info("Product deleted: {} by user: {}", id, owner.getUsername());
+                return ResponseEntity.ok(Map.of(
+                        "status", "success",
+                        "message", "Product deleted successfully"
+                ));
             }
+
             return ResponseEntity.notFound().build();
+
+        } catch (SecurityException e) {
+            log.warn("Unauthorized product delete attempt: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                    "status", "error",
+                    "message", "You don't have permission to delete this product"
+            ));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Error: " + e.getMessage());
+            log.error("Error deleting product", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "status", "error",
+                    "message", "Failed to delete product"
+            ));
         }
     }
 }

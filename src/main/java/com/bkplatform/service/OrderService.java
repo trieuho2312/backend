@@ -13,7 +13,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.text.NumberFormat;
 import java.util.List;
+import java.util.Locale;
 
 @Slf4j
 @Service
@@ -25,6 +27,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final ProductRepository productRepository;
+    private final EmailService emailService;
 
     @Transactional
     public CheckoutResponse checkout(User user) {
@@ -34,7 +37,7 @@ public class OrderService {
         Cart cart = cartRepository.findByUser(user)
                 .orElseThrow(() -> new ResourceNotFoundException("Cart not found"));
 
-        // ✅ FIX: Use findByCart instead of findAll().filter()
+        // ✅ Get cart items
         List<CartItem> items = cartItemRepository.findByCart(cart);
 
         // ✅ Validate cart not empty
@@ -94,7 +97,7 @@ public class OrderService {
                     .build();
             orderItemRepository.save(orderItem);
 
-            // ✅ CRITICAL FIX: Reduce stock quantity
+            // ✅ CRITICAL: Reduce stock quantity
             int newStock = product.getStockQuantity() - item.getQuantity();
             product.setStockQuantity(newStock);
             productRepository.save(product);
@@ -111,11 +114,33 @@ public class OrderService {
 
         log.info("Checkout completed successfully for order {}", order.getOrderId());
 
+        // ✅ FIX: Send order confirmation email
+        try {
+            String formattedAmount = formatCurrency(total);
+            emailService.sendOrderConfirmationEmail(
+                    user.getEmail(),
+                    order.getOrderId(),
+                    formattedAmount
+            );
+            log.info("Order confirmation email sent to: {}", user.getEmail());
+        } catch (Exception e) {
+            // Don't fail checkout if email fails
+            log.error("Failed to send order confirmation email", e);
+        }
+
         // Build response
         CheckoutResponse response = new CheckoutResponse();
         response.setOrderId(order.getOrderId());
         response.setStatus("SUCCESS");
         return response;
+    }
+
+    /**
+     * ✅ Format currency for Vietnamese Dong
+     */
+    private String formatCurrency(BigDecimal amount) {
+        NumberFormat formatter = NumberFormat.getInstance(new Locale("vi", "VN"));
+        return formatter.format(amount);
     }
 
     /**
@@ -142,9 +167,12 @@ public class OrderService {
 
     /**
      * Cancel order (if not yet processed)
+     * ✅ FIX: Add proper validation and logging
      */
     @Transactional
     public void cancelOrder(Long orderId, User user) {
+        log.info("Cancelling order {} by user {}", orderId, user.getUsername());
+
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
@@ -153,20 +181,34 @@ public class OrderService {
             throw new UnauthorizedException("You don't have permission to cancel this order");
         }
 
-        // ✅ Check if order can be cancelled (add your business logic here)
-        // For example: only allow cancel within 24 hours, or if status is PENDING
+        // ✅ Check if order can be cancelled (example: within 1 hour of order)
+        long hoursSinceOrder = java.time.Duration.between(
+                order.getOrderDate().toInstant(),
+                java.time.Instant.now()
+        ).toHours();
+
+        if (hoursSinceOrder > 1) {
+            throw new IllegalStateException("Order can only be cancelled within 1 hour of placement");
+        }
 
         // ✅ Restore stock
         List<OrderItem> orderItems = order.getOrderItems();
         for (OrderItem item : orderItems) {
             Product product = item.getProduct();
-            product.setStockQuantity(product.getStockQuantity() + item.getQuantity());
+            int restoredStock = product.getStockQuantity() + item.getQuantity();
+            product.setStockQuantity(restoredStock);
             productRepository.save(product);
+
+            log.info("Restored stock for product {}: {} -> {}",
+                    product.getProductId(),
+                    product.getStockQuantity() - item.getQuantity(),
+                    restoredStock
+            );
         }
 
-        // Delete order (or update status to CANCELLED)
+        // Delete order
         orderRepository.delete(order);
 
-        log.info("Order {} cancelled by user {}", orderId, user.getUsername());
+        log.info("Order {} cancelled successfully by user {}", orderId, user.getUsername());
     }
 }

@@ -23,8 +23,9 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final EmailService emailService;
 
-    // ✅ FIX: Stronger email validation pattern
+    // ✅ Stronger email validation pattern
     private static final Pattern HUST_EMAIL_PATTERN = Pattern.compile(
             "^[a-zA-Z0-9._%+-]+@hust\\.edu\\.vn$",
             Pattern.CASE_INSENSITIVE
@@ -43,8 +44,6 @@ public class AuthService {
         if (email == null || email.trim().isEmpty()) {
             return false;
         }
-
-        // ✅ FIX: Use regex pattern instead of simple endsWith
         return HUST_EMAIL_PATTERN.matcher(email.trim()).matches();
     }
 
@@ -58,7 +57,7 @@ public class AuthService {
             );
         }
 
-        // ✅ Optional: Enforce password complexity
+        // ✅ Optional: Enforce password complexity (uncomment if needed)
         // if (!PASSWORD_PATTERN.matcher(password).matches()) {
         //     throw new InvalidDataException(
         //         "Password must contain at least one uppercase letter, one lowercase letter, and one digit"
@@ -68,6 +67,7 @@ public class AuthService {
 
     /**
      * Register new user
+     * ✅ FIX: Send welcome email after successful registration
      */
     @Transactional
     public User register(RegisterRequest req) {
@@ -96,8 +96,8 @@ public class AuthService {
 
         // Create user
         User user = User.builder()
-                .username(req.getUsername())
-                .fullName(req.getFullName())
+                .username(req.getUsername().trim())
+                .fullName(req.getFullName().trim())
                 .email(normalizedEmail)
                 .password(passwordEncoder.encode(req.getPassword()))
                 .role(Role.USER)
@@ -105,6 +105,15 @@ public class AuthService {
 
         User saved = userRepository.save(user);
         log.info("User registered successfully: {}", saved.getUsername());
+
+        // ✅ FIX: Send welcome email asynchronously
+        try {
+            emailService.sendWelcomeEmail(saved.getEmail(), saved.getFullName());
+            log.info("Welcome email sent to: {}", saved.getEmail());
+        } catch (Exception e) {
+            // Don't fail registration if email fails
+            log.error("Failed to send welcome email to: {}", saved.getEmail(), e);
+        }
 
         return saved;
     }
@@ -176,13 +185,14 @@ public class AuthService {
     }
 
     /**
-     * Request password reset (you'll need to implement email sending)
+     * Request password reset
+     * ✅ FIX: Actually send reset email
      */
     public void requestPasswordReset(String email) {
         log.info("Password reset requested for email: {}", email);
 
         // Find user by email
-        User user = userRepository.findByEmail(email).orElse(null);
+        User user = userRepository.findByEmail(email.toLowerCase().trim()).orElse(null);
 
         // ✅ Don't reveal if email exists (security best practice)
         if (user == null) {
@@ -191,10 +201,40 @@ public class AuthService {
             return;
         }
 
-        // TODO: Generate reset token and send email
-        // String resetToken = generateResetToken(user);
-        // emailService.sendPasswordResetEmail(user.getEmail(), resetToken);
+        // ✅ Generate reset token (simple implementation - use UUID in production)
+        String resetToken = generateResetToken(user);
 
-        log.info("Password reset email would be sent to: {}", email);
+        // ✅ Send password reset email
+        try {
+            emailService.sendPasswordResetEmail(user.getEmail(), resetToken);
+            log.info("Password reset email sent to: {}", user.getEmail());
+        } catch (Exception e) {
+            log.error("Failed to send password reset email to: {}", user.getEmail(), e);
+            // Don't expose error to user
+        }
+    }
+
+    /**
+     * Generate reset token (simple implementation)
+     * ✅ TODO: In production, use proper token generation and storage
+     */
+    private String generateResetToken(User user) {
+        // Simple implementation - you should use UUID and store in database
+        // with expiration time in production
+        return java.util.UUID.randomUUID().toString();
+    }
+
+    /**
+     * Reset password with token
+     * ✅ TODO: Implement token validation logic
+     */
+    @Transactional
+    public void resetPassword(String token, String newPassword) {
+        // TODO: Validate token from database
+        // TODO: Check token expiration
+        // TODO: Get user from token
+        // TODO: Update password
+
+        throw new UnsupportedOperationException("Reset password with token not yet implemented");
     }
 }

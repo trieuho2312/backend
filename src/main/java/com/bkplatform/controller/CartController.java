@@ -12,40 +12,77 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
-@RestController @RequestMapping("/api/cart")
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/cart")
 @RequiredArgsConstructor
 public class CartController {
     private final CartService cartService;
     private final UserRepository userRepository;
 
+    /**
+     * ✅ Get current user's cart
+     */
     @GetMapping
     public ResponseEntity<?> getCart(@AuthenticationPrincipal UserDetails principal) {
         User user = userRepository.findByUsername(principal.getUsername()).orElseThrow();
         return ResponseEntity.ok(cartService.getCart(user));
     }
 
+    /**
+     * ✅ Add item to cart - FIX: Return meaningful response
+     */
     @PostMapping("/items")
-    public ResponseEntity<?> addItem(@AuthenticationPrincipal UserDetails principal,
-                                     @Valid @RequestBody AddCartItemRequest req) {
+    public ResponseEntity<?> addItem(
+            @AuthenticationPrincipal UserDetails principal,
+            @Valid @RequestBody AddCartItemRequest req) {
+
         User user = userRepository.findByUsername(principal.getUsername()).orElseThrow();
         cartService.addItem(user, req);
-        return ResponseEntity.ok().build();
+
+        // ✅ Return success message instead of empty response
+        return ResponseEntity.ok(Map.of(
+                "status", "success",
+                "message", "Item added to cart"
+        ));
     }
 
+    /**
+     * ✅ Update cart item quantity - FIX: Return meaningful response
+     */
     @PutMapping("/items/{productId}")
-    public ResponseEntity<?> updateItem(@AuthenticationPrincipal UserDetails principal,
-                                        @PathVariable Long productId,
-                                        @Valid @RequestBody UpdateCartItemRequest req) {
+    public ResponseEntity<?> updateItem(
+            @AuthenticationPrincipal UserDetails principal,
+            @PathVariable Long productId,
+            @Valid @RequestBody UpdateCartItemRequest req) {
+
         User user = userRepository.findByUsername(principal.getUsername()).orElseThrow();
         cartService.updateItem(user, productId, req.getQuantity());
-        return ResponseEntity.ok().build();
+
+        // ✅ Return success message
+        return ResponseEntity.ok(Map.of(
+                "status", "success",
+                "message", "Cart item updated",
+                "quantity", req.getQuantity()
+        ));
     }
 
+    /**
+     * ✅ Remove item from cart - FIX: Return meaningful response
+     */
     @DeleteMapping("/items/{productId}")
-    public ResponseEntity<?> removeItem(@AuthenticationPrincipal UserDetails principal,
-                                        @PathVariable Long productId) {
+    public ResponseEntity<?> removeItem(
+            @AuthenticationPrincipal UserDetails principal,
+            @PathVariable Long productId) {
+
         User user = userRepository.findByUsername(principal.getUsername()).orElseThrow();
         cartService.removeItem(user, productId);
-        return ResponseEntity.ok().build();
+
+        // ✅ Return success message
+        return ResponseEntity.ok(Map.of(
+                "status", "success",
+                "message", "Item removed from cart"
+        ));
     }
 }

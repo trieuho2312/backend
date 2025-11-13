@@ -1,0 +1,27 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/bkplatform}
+    username: ${SPRING_DATASOURCE_USERNAME:bkplatform}
+    password: ${SPRING_DATASOURCE_PASSWORD:secret}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    open-in-view: false
+  flyway:
+    enabled: false
+
+app:
+  jwt:
+    secret: bkpLATformSuperSecureSecretKeyForJWT2025!@#
+    expiration: 3600000 # 1h
+
+# CORS
+cors:
+  allowed-origins: "http://localhost:5173"

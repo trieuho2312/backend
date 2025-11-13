@@ -2,6 +2,7 @@ package com.bkplatform.config;
 
 import com.bkplatform.security.JwtAuthFilter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -9,8 +10,10 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -18,11 +21,13 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.List;
 
 @Configuration
+@EnableWebSecurity
 @EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
@@ -30,39 +35,125 @@ public class SecurityConfig {
     private final UserDetailsService userDetailsService;
     private final JwtAuthFilter jwtAuthFilter;
 
+    // ✅ Allow configuration from properties
+    @Value("${app.cors.allowed-origins:http://localhost:3000,http://localhost:5173}")
+    private String[] allowedOrigins;
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                // ✅ CORS configuration
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-                .csrf(csrf -> csrf.disable())
-                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+
+                // ✅ Disable CSRF (not needed for stateless JWT)
+                .csrf(AbstractHttpConfigurer::disable)
+
+                // ✅ Stateless session management
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                )
+
+                // ✅ Authorization rules
                 .authorizeHttpRequests(auth -> auth
-                        // ✅ OPTIONS request (CORS preflight)
+                        // OPTIONS requests (CORS preflight) - always allow
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                        // ✅ Auth endpoints - KHÔNG CẦN TOKEN
-                        .requestMatchers("/api/auth/**").permitAll()
+                        // Public auth endpoints
+                        .requestMatchers("/api/auth/register", "/api/auth/login").permitAll()
 
-                        // ✅ Public READ endpoints - CHỈ GET KHÔNG CẦN TOKEN
+                        // Public API documentation (if using Swagger)
+                        .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-ui.html").permitAll()
+
+                        // ✅ Public READ endpoints (GET without authentication)
                         .requestMatchers(HttpMethod.GET, "/api/products/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/categories/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/shops/**").permitAll()
 
-                        // ✅ WRITE operations - CẦN TOKEN
+                        // ✅ WRITE operations - require authentication
                         .requestMatchers(HttpMethod.POST, "/api/products/**").authenticated()
                         .requestMatchers(HttpMethod.PUT, "/api/products/**").authenticated()
-                        .requestMatchers(HttpMethod.DELETE, "/api/products/**").authenticated()
                         .requestMatchers(HttpMethod.PATCH, "/api/products/**").authenticated()
+                        .requestMatchers(HttpMethod.DELETE, "/api/products/**").authenticated()
 
-                        // ✅ Tất cả các endpoint khác - CẦN TOKEN
+                        // ✅ Cart operations - require authentication
+                        .requestMatchers("/api/cart/**").authenticated()
+
+                        // ✅ Order operations - require authentication
+                        .requestMatchers("/api/orders/**").authenticated()
+
+                        // ✅ User profile operations - require authentication
+                        .requestMatchers("/api/users/**").authenticated()
+
+                        // ✅ Admin endpoints - require ADMIN role (using method security)
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+
+                        // ✅ All other requests require authentication
                         .anyRequest().authenticated()
                 )
+
+                // ✅ Authentication provider
                 .authenticationProvider(authenticationProvider())
+
+                // ✅ Add JWT filter before UsernamePasswordAuthenticationFilter
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
 
+    /**
+     * CORS configuration
+     */
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration config = new CorsConfiguration();
+
+        // ✅ FIX: Use specific origins from properties instead of wildcards
+        config.setAllowedOrigins(List.of(allowedOrigins));
+
+        // ✅ Alternative: Use patterns for development (not recommended for production)
+        // config.setAllowedOriginPatterns(List.of("http://localhost:*", "http://127.0.0.1:*"));
+
+        // ✅ Allow credentials (required for cookies/auth headers)
+        config.setAllowCredentials(true);
+
+        // ✅ Allowed headers
+        config.setAllowedHeaders(List.of(
+                "Authorization",
+                "Content-Type",
+                "Accept",
+                "X-Requested-With",
+                "Cache-Control"
+        ));
+
+        // ✅ Allowed methods
+        config.setAllowedMethods(List.of(
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE",
+                "OPTIONS"
+        ));
+
+        // ✅ Expose headers (so client can read them)
+        config.setExposedHeaders(List.of(
+                "Authorization",
+                "X-Token-Expired",
+                "X-Total-Count"
+        ));
+
+        // ✅ Cache preflight requests for 1 hour
+        config.setMaxAge(3600L);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+
+        return source;
+    }
+
+    /**
+     * Authentication provider with custom UserDetailsService
+     */
     @Bean
     public AuthenticationProvider authenticationProvider() {
         DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
@@ -71,30 +162,21 @@ public class SecurityConfig {
         return provider;
     }
 
+    /**
+     * Password encoder - BCrypt with strength 12
+     */
     @Bean
     public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
+        // ✅ BCrypt with strength 12 (default is 10)
+        return new BCryptPasswordEncoder(12);
     }
 
+    /**
+     * Authentication manager
+     */
     @Bean
-    public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration config)
+            throws Exception {
         return config.getAuthenticationManager();
-    }
-
-    @Bean
-    public UrlBasedCorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration config = new CorsConfiguration();
-        config.setAllowCredentials(true);
-        config.setAllowedOriginPatterns(List.of(
-                "http://localhost:*",
-                "http://127.0.0.1:*"
-        ));
-        config.setAllowedHeaders(List.of("*"));
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
-        config.setExposedHeaders(List.of("Authorization"));
-
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", config);
-        return source;
     }
 }
